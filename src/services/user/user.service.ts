@@ -1,49 +1,61 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { CreateUserDTO } from 'src/dtos/user.dtos';
 import { User } from 'src/entities/user.entity';
 import * as bcrypt from 'bcrypt';
-
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 @Injectable()
 export class UserService {
-  private counterId = 1;
-  private users: User[] = [
-    {
-      userId: 1,
-      email: 'josejo@gmail.com',
-      password: '123456',
-    },
-  ];
+  constructor(
+   @InjectRepository(User)
+   private userRepository: Repository<User>
+  ) {}
   
   findAll(){
-    return this.users;
+    return this.userRepository;
   }
 
   findOne(userId: number) {
-    const user = this.users.find((item) => item.userId === userId);
+    const user = this.userRepository.findOne({ where: { userId: userId } });
     if(!user){
       throw new NotFoundException(`User with id:${userId} does not exist`);
     }
     return user;
   }
-
-  async create(payload: CreateUserDTO){
-    console.log(payload);
-    this.counterId = this.counterId + 1;
+  
+  async create(payload: CreateUserDTO):  Promise<User>{
+    const { email, password } = payload;
+    const existingUser = this.userRepository.findOne({ where: { email } });
+    if(!existingUser){
+      throw new ConflictException(`User with email already exists`);
+    }
     const saltRounds = 8;
     try {
-      const passwordHash = await bcrypt.hash(payload.password, saltRounds )
-      const newUser: User = {
-      userId: this.counterId,
-      email: payload.email,
-      password: passwordHash,
-    };
-    this.users.push(newUser);
-    return newUser;
-   }catch (error) {
-    throw error;
-   }    
+       const passwordHash = await bcrypt.hash(password, saltRounds);
+       const newUser = this.userRepository.create({ 
+        email, 
+        password: passwordHash, });
+       return await this.userRepository.save(newUser);
+    }catch(error){
+      throw error;
+    }
   }
 
 
- /*  async logIn(payload: ) */
+ async logIn(email:string, password:string): Promise<User> {
+   try {
+     const user = await this.userRepository.findOne({ where: { email } }); 
+     if(!user){
+       throw new UnauthorizedException('Invalid credentials');
+     }  
+     const isPasswordValid = await bcrypt.compare(password, user.password);
+
+     if (!isPasswordValid) {
+       throw new UnauthorizedException('Invalid credentials');
+     }
+     return user;
+   } catch (error) {
+     throw error;
+   }
+ } 
 }
